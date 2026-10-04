@@ -440,7 +440,7 @@ class MainTests {
 
     val resolver = CombatResolver(
       hitResolution = AlwaysHit,
-      damageFormula = DamageFormula { DamageRange(10, 20) },
+      damageFormula = { DamageRange(10, 20) },
       damageRoll = UniformDamageRoll(DeterministicRandomSource(16)),
       mitigation = MitigationChain(
         FixedReductionMitigation(2),
@@ -492,7 +492,7 @@ class MainTests {
     val idxProduced = kinds.indexOf(CombatEvent.DamageProduced::class)
     val idxApplied = kinds.indexOf(CombatEvent.DamageApplied::class)
     val idxDefeat = kinds.indexOf(CombatEvent.Defeat::class)
-    assertTrue(idxProduced >= 0 && idxApplied > idxProduced)
+    assertTrue(idxProduced in 0..<idxApplied)
     assertTrue(idxDefeat in (idxProduced + 1) until idxApplied)
   }
 
