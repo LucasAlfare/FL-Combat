@@ -344,3 +344,11 @@ data class Attack(
   override val target: Agent,
   val damageType: String
 ) : CombatAction
+
+fun interface HitResolution {
+  fun resolve(action: CombatAction, state: CombatState): Boolean
+}
+
+object AlwaysHit : HitResolution {
+  override fun resolve(action: CombatAction, state: CombatState): Boolean = true
+}
