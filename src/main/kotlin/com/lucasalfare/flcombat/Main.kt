@@ -196,3 +196,29 @@ class DeterministicRandomSource(
     return next
   }
 }
+
+data class DamageRange(val min: Int, val max: Int) {
+  init {
+    require(min >= 0) { "Damage min ($min) must not be negative" }
+    require(min <= max) { "DamageRange min ($min) must be <= max ($max)" }
+  }
+}
+
+data class DamageContext(
+  val attacker: Agent,
+  val target: Agent,
+  val state: CombatState
+)
+
+fun interface DamageFormula {
+  fun calculate(context: DamageContext): DamageRange
+}
+
+class FixedDamageFormula(private val damage: Int) : DamageFormula {
+  init {
+    require(damage >= 0) { "Fixed damage ($damage) must not be negative" }
+  }
+
+  override fun calculate(context: DamageContext): DamageRange =
+    DamageRange(damage, damage)
+}
