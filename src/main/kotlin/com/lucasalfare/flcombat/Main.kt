@@ -332,3 +332,15 @@ data class DamageResult(
     require(appliedDamage >= 0) { "appliedDamage ($appliedDamage) must not be negative" }
   }
 }
+
+interface CombatAction {
+  val attacker: Agent
+  val target: Agent
+}
+
+// example of an action only; interactions (combat actions) must be totally free.
+data class Attack(
+  override val attacker: Agent,
+  override val target: Agent,
+  val damageType: String
+) : CombatAction
