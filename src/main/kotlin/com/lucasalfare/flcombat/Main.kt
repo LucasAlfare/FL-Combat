@@ -239,13 +239,66 @@ class UniformDamageRoll(
     randomSource.nextInt(range.min, range.max)
 }
 
+data class MitigationContext(
+  val origin: Agent,
+  val target: Agent,
+  val damageType: String,
+  val state: CombatState
+)
+
+fun interface Mitigation {
+  fun mitigate(rolledDamage: Int, context: MitigationContext): Int
+}
+
+object NoMitigation : Mitigation {
+  override fun mitigate(rolledDamage: Int, context: MitigationContext): Int =
+    rolledDamage.coerceAtLeast(0)
+}
+
+class FixedReductionMitigation(private val reduction: Int) : Mitigation {
+  init {
+    require(reduction >= 0) { "Fixed reduction ($reduction) must not be negative" }
+  }
+
+  override fun mitigate(rolledDamage: Int, context: MitigationContext): Int =
+    (rolledDamage - reduction).coerceAtLeast(0)
+}
+
+class PercentageReductionMitigation(private val percentage: Int) : Mitigation {
+  init {
+    require(percentage >= 0) { "Percentage ($percentage) must not be negative" }
+  }
+
+  override fun mitigate(rolledDamage: Int, context: MitigationContext): Int {
+    val factor = (100 - percentage).coerceAtLeast(0)
+    return floor(rolledDamage * factor / 100.0).toInt().coerceAtLeast(0)
+  }
+}
+
+class MitigationChain(
+  private val mitigations: List<Mitigation>
+) : Mitigation {
+
+  constructor(vararg mitigations: Mitigation) : this(mitigations.toList())
+
+  override fun mitigate(rolledDamage: Int, context: MitigationContext): Int {
+    var current = rolledDamage.coerceAtLeast(0)
+    for (mitigation in mitigations) {
+      current = mitigation.mitigate(current, context).coerceAtLeast(0)
+    }
+    return current
+  }
+}
+
 data class DamageResult(
   val origin: Agent,
   val target: Agent,
   val damageType: String,
-  val rolledDamage: Int
+  val rolledDamage: Int,
+  val mitigatedDamage: Int
 ) {
   init {
     require(rolledDamage >= 0) { "rolledDamage ($rolledDamage) must not be negative" }
+    require(mitigatedDamage >= 0) { "mitigatedDamage ($mitigatedDamage) must not be negative" }
   }
 }
