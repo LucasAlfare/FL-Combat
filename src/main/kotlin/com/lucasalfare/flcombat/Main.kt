@@ -64,6 +64,7 @@ class CombatState(
   private val modifiers: MutableMap<Agent, MutableMap<String, MutableList<Modifier>>> = mutableMapOf()
   private val items: MutableMap<Agent, MutableMap<String, Item>> = mutableMapOf()
   private val effects: MutableMap<Agent, MutableMap<String, Effect>> = mutableMapOf()
+  private val defeated: MutableSet<Agent> = mutableSetOf()
 
   fun register(agent: Agent) {
     agents.add(agent)
@@ -72,6 +73,13 @@ class CombatState(
   fun contains(agent: Agent): Boolean = agent in agents
 
   fun agents(): Set<Agent> = agents.toSet()
+
+  fun markDefeated(agent: Agent) {
+    require(agent in agents) { "Agent '${agent.id}' is not registered" }
+    defeated.add(agent)
+  }
+
+  fun isDefeated(agent: Agent): Boolean = agent in defeated
 
   fun setAttribute(agent: Agent, id: String, baseValue: Int) {
     require(agent in agents) { "Agent '${agent.id}' is not registered" }
@@ -290,15 +298,37 @@ class MitigationChain(
   }
 }
 
+data class DamageApplicationContext(
+  val origin: Agent,
+  val target: Agent,
+  val damageType: String,
+  val state: CombatState
+)
+
+data class DamageApplicationResult(
+  val appliedDamage: Int,
+  val targetDefeated: Boolean
+) {
+  init {
+    require(appliedDamage >= 0) { "appliedDamage ($appliedDamage) must not be negative" }
+  }
+}
+
+fun interface DamageApplication {
+  fun apply(mitigatedDamage: Int, context: DamageApplicationContext): DamageApplicationResult
+}
+
 data class DamageResult(
   val origin: Agent,
   val target: Agent,
   val damageType: String,
   val rolledDamage: Int,
-  val mitigatedDamage: Int
+  val mitigatedDamage: Int,
+  val appliedDamage: Int
 ) {
   init {
     require(rolledDamage >= 0) { "rolledDamage ($rolledDamage) must not be negative" }
     require(mitigatedDamage >= 0) { "mitigatedDamage ($mitigatedDamage) must not be negative" }
+    require(appliedDamage >= 0) { "appliedDamage ($appliedDamage) must not be negative" }
   }
 }
