@@ -5,7 +5,7 @@
 
 [![Kotlin](https://img.shields.io/badge/language-Kotlin-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
 [![License](https://img.shields.io/badge/license-MIT-informational.svg)](./LICENSE)
-[![JitPack](https://jitpack.io/v/YOUR_GITHUB_USERNAME/YOUR_REPOSITORY.svg)](https://jitpack.io/#YOUR_GITHUB_USERNAME/YOUR_REPOSITORY)
+[![](https://jitpack.io/v/LucasAlfare/FL-Combat.svg)](https://jitpack.io/#LucasAlfare/FL-Combat)
 </div>
 
 FLCombat provides the mechanics needed to model combat without deciding what those mechanics mean for a specific game.
@@ -130,14 +130,8 @@ Keep JitPack after your normal Maven repositories.
 
 ```kotlin
 dependencies {
-  implementation("com.github.YOUR_GITHUB_USERNAME:YOUR_REPOSITORY:YOUR_VERSION")
+  implementation("com.github.LucasAlfare:FL-Combat:1.0.0")
 }
-```
-
-For example, after publishing version `1.0.0`, the dependency will follow the form:
-
-```kotlin
-implementation("com.github.YOUR_GITHUB_USERNAME:YOUR_REPOSITORY:1.0.0")
 ```
 
 ## Quick start
