@@ -19,6 +19,25 @@ data class Item(
   val modifiers: Map<String, List<Modifier>> = emptyMap()
 )
 
+class Effect(
+  val id: String,
+  val modifiers: Map<String, List<Modifier>> = emptyMap(),
+  val durationTicks: Int? = null,
+  val onApply: (Agent, CombatState) -> Unit = { _, _ -> },
+  val onRemove: (Agent, CombatState) -> Unit = { _, _ -> }
+) {
+  var remainingTicks: Int? = durationTicks
+    private set
+
+  val isPermanent: Boolean get() = durationTicks == null
+  val isExpired: Boolean get() = remainingTicks == 0
+
+  fun tick() {
+    val remaining = remainingTicks ?: return
+    if (remaining > 0) remainingTicks = remaining - 1
+  }
+}
+
 fun interface ModifierComposer {
   fun compose(baseValue: Int, modifiers: Collection<Modifier>): Int
 }
@@ -43,6 +62,7 @@ class CombatState(
   private val baseValues: MutableMap<Agent, MutableMap<String, Int>> = mutableMapOf()
   private val modifiers: MutableMap<Agent, MutableMap<String, MutableList<Modifier>>> = mutableMapOf()
   private val items: MutableMap<Agent, MutableMap<String, Item>> = mutableMapOf()
+  private val effects: MutableMap<Agent, MutableMap<String, Effect>> = mutableMapOf()
 
   fun register(agent: Agent) {
     agents.add(agent)
@@ -83,12 +103,48 @@ class CombatState(
   fun items(agent: Agent): Set<Item> =
     items[agent]?.values?.toSet() ?: emptySet()
 
+  fun applyEffect(agent: Agent, effect: Effect) {
+    require(agent in agents) { "Agent '${agent.id}' is not registered" }
+    val agentEffects = effects.getOrPut(agent) { mutableMapOf() }
+    agentEffects[effect.id]?.onRemove?.invoke(agent, this)
+    agentEffects[effect.id] = effect
+    effect.onApply(agent, this)
+  }
+
+  fun removeEffect(agent: Agent, effectId: String): Effect? {
+    val removed = effects[agent]?.remove(effectId) ?: return null
+    removed.onRemove(agent, this)
+    return removed
+  }
+
+  fun effects(agent: Agent): Set<Effect> =
+    effects[agent]?.values?.toSet() ?: emptySet()
+
+  fun effect(agent: Agent, effectId: String): Effect? =
+    effects[agent]?.get(effectId)
+
+  fun tick(agent: Agent) {
+    val agentEffects = effects[agent] ?: return
+    val expired = mutableListOf<Effect>()
+    for (effect in agentEffects.values) {
+      effect.tick()
+      if (effect.isExpired) expired.add(effect)
+    }
+    for (effect in expired) {
+      agentEffects.remove(effect.id)
+      effect.onRemove(agent, this)
+    }
+  }
+
   fun modifiers(agent: Agent, attributeId: String): List<Modifier> {
     val direct = modifiers[agent]?.get(attributeId)?.toList() ?: emptyList()
     val fromItems = items[agent]?.values
       ?.flatMap { it.modifiers[attributeId].orEmpty() }
       ?: emptyList()
-    return direct + fromItems
+    val fromEffects = effects[agent]?.values
+      ?.flatMap { it.modifiers[attributeId].orEmpty() }
+      ?: emptyList()
+    return direct + fromItems + fromEffects
   }
 
   fun attribute(agent: Agent, id: String): Attribute? {
