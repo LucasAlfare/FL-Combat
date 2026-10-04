@@ -65,6 +65,13 @@ class CombatState(
   private val items: MutableMap<Agent, MutableMap<String, Item>> = mutableMapOf()
   private val effects: MutableMap<Agent, MutableMap<String, Effect>> = mutableMapOf()
   private val defeated: MutableSet<Agent> = mutableSetOf()
+  private val pendingEvents: MutableList<CombatEvent> = mutableListOf()
+
+  fun drainEvents(): List<CombatEvent> {
+    val drained = pendingEvents.toList()
+    pendingEvents.clear()
+    return drained
+  }
 
   fun register(agent: Agent) {
     agents.add(agent)
@@ -76,7 +83,9 @@ class CombatState(
 
   fun markDefeated(agent: Agent) {
     require(agent in agents) { "Agent '${agent.id}' is not registered" }
-    defeated.add(agent)
+    if (defeated.add(agent)) {
+      pendingEvents.add(CombatEvent.Defeat(agent))
+    }
   }
 
   fun isDefeated(agent: Agent): Boolean = agent in defeated
@@ -115,14 +124,19 @@ class CombatState(
   fun applyEffect(agent: Agent, effect: Effect) {
     require(agent in agents) { "Agent '${agent.id}' is not registered" }
     val agentEffects = effects.getOrPut(agent) { mutableMapOf() }
-    agentEffects[effect.id]?.onRemove?.invoke(agent, this)
+    agentEffects[effect.id]?.let { previous ->
+      previous.onRemove(agent, this)
+      pendingEvents.add(CombatEvent.EffectRemoved(agent, previous))
+    }
     agentEffects[effect.id] = effect
     effect.onApply(agent, this)
+    pendingEvents.add(CombatEvent.EffectApplied(agent, effect))
   }
 
   fun removeEffect(agent: Agent, effectId: String): Effect? {
     val removed = effects[agent]?.remove(effectId) ?: return null
     removed.onRemove(agent, this)
+    pendingEvents.add(CombatEvent.EffectRemoved(agent, removed))
     return removed
   }
 
@@ -142,6 +156,7 @@ class CombatState(
     for (effect in expired) {
       agentEffects.remove(effect.id)
       effect.onRemove(agent, this)
+      pendingEvents.add(CombatEvent.EffectRemoved(agent, effect))
     }
   }
 
@@ -358,7 +373,8 @@ data class CombatResult(
   val action: CombatAction,
   val hit: Boolean,
   val damageResult: DamageResult?,
-  val state: CombatState
+  val state: CombatState,
+  val events: List<CombatEvent>
 )
 
 class CombatResolver(
@@ -370,13 +386,19 @@ class CombatResolver(
 ) {
 
   fun resolve(action: CombatAction, state: CombatState): CombatResult {
+    state.drainEvents()
+
     val attacker = action.attacker
     val target = action.target
     val damageType = action.damageType
 
     if (!hitResolution.resolve(action, state)) {
-      return CombatResult(action, hit = false, damageResult = null, state = state)
+      val events = state.drainEvents() + CombatEvent.AttackMissed(action)
+      return CombatResult(action, hit = false, damageResult = null, state = state, events = events)
     }
+
+    val events = mutableListOf<CombatEvent>()
+    events.add(CombatEvent.AttackPerformed(action))
 
     val range = damageFormula.calculate(DamageContext(attacker, target, state))
     val rolledDamage = damageRoll.roll(range)
@@ -398,6 +420,22 @@ class CombatResolver(
       appliedDamage = applicationResult.appliedDamage
     )
 
-    return CombatResult(action, hit = true, damageResult = damageResult, state = state)
+    val stateEvents = state.drainEvents()
+
+    events.add(CombatEvent.DamageProduced(damageResult))
+    events.addAll(stateEvents)
+    events.add(CombatEvent.DamageApplied(damageResult))
+
+    return CombatResult(action, hit = true, damageResult = damageResult, state = state, events = events)
   }
+}
+
+sealed interface CombatEvent {
+  data class AttackPerformed(val action: CombatAction) : CombatEvent
+  data class AttackMissed(val action: CombatAction) : CombatEvent
+  data class DamageProduced(val result: DamageResult) : CombatEvent
+  data class DamageApplied(val result: DamageResult) : CombatEvent
+  data class EffectApplied(val agent: Agent, val effect: Effect) : CombatEvent
+  data class EffectRemoved(val agent: Agent, val effect: Effect) : CombatEvent
+  data class Defeat(val agent: Agent) : CombatEvent
 }
