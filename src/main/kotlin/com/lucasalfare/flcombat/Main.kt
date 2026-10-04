@@ -3,6 +3,7 @@
 package com.lucasalfare.flcombat
 
 import kotlin.math.floor
+import kotlin.random.Random
 
 data class Agent(val id: String)
 
@@ -159,5 +160,39 @@ class CombatState(
   fun removeAttribute(agent: Agent, id: String) {
     baseValues[agent]?.remove(id)
     modifiers[agent]?.remove(id)
+  }
+}
+
+fun interface RandomSource {
+  fun nextInt(fromInclusive: Int, toInclusive: Int): Int
+}
+
+object DefaultRandomSource : RandomSource {
+  private val random = Random.Default
+
+  override fun nextInt(fromInclusive: Int, toInclusive: Int): Int {
+    require(fromInclusive <= toInclusive) {
+      "fromInclusive ($fromInclusive) must be <= toInclusive ($toInclusive)"
+    }
+    if (fromInclusive == toInclusive) return fromInclusive
+    return random.nextInt(fromInclusive, toInclusive + 1)
+  }
+}
+
+class DeterministicRandomSource(
+  private val values: Iterator<Int>
+) : RandomSource {
+
+  constructor(vararg values: Int) : this(values.iterator())
+
+  override fun nextInt(fromInclusive: Int, toInclusive: Int): Int {
+    require(fromInclusive <= toInclusive) {
+      "fromInclusive ($fromInclusive) must be <= toInclusive ($toInclusive)"
+    }
+    val next = values.next()
+    require(next in fromInclusive..toInclusive) {
+      "Deterministic value $next is outside [$fromInclusive, $toInclusive]"
+    }
+    return next
   }
 }
