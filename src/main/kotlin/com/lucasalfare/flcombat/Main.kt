@@ -336,13 +336,14 @@ data class DamageResult(
 interface CombatAction {
   val attacker: Agent
   val target: Agent
+  val damageType: String
 }
 
 // example of an action only; interactions (combat actions) must be totally free.
 data class Attack(
   override val attacker: Agent,
   override val target: Agent,
-  val damageType: String
+  override val damageType: String
 ) : CombatAction
 
 fun interface HitResolution {
@@ -351,4 +352,52 @@ fun interface HitResolution {
 
 object AlwaysHit : HitResolution {
   override fun resolve(action: CombatAction, state: CombatState): Boolean = true
+}
+
+data class CombatResult(
+  val action: CombatAction,
+  val hit: Boolean,
+  val damageResult: DamageResult?,
+  val state: CombatState
+)
+
+class CombatResolver(
+  private val hitResolution: HitResolution,
+  private val damageFormula: DamageFormula,
+  private val damageRoll: DamageRoll,
+  private val mitigation: Mitigation,
+  private val damageApplication: DamageApplication
+) {
+
+  fun resolve(action: CombatAction, state: CombatState): CombatResult {
+    val attacker = action.attacker
+    val target = action.target
+    val damageType = action.damageType
+
+    if (!hitResolution.resolve(action, state)) {
+      return CombatResult(action, hit = false, damageResult = null, state = state)
+    }
+
+    val range = damageFormula.calculate(DamageContext(attacker, target, state))
+    val rolledDamage = damageRoll.roll(range)
+    val mitigatedDamage = mitigation.mitigate(
+      rolledDamage,
+      MitigationContext(attacker, target, damageType, state)
+    )
+    val applicationResult = damageApplication.apply(
+      mitigatedDamage,
+      DamageApplicationContext(attacker, target, damageType, state)
+    )
+
+    val damageResult = DamageResult(
+      origin = attacker,
+      target = target,
+      damageType = damageType,
+      rolledDamage = rolledDamage,
+      mitigatedDamage = mitigatedDamage,
+      appliedDamage = applicationResult.appliedDamage
+    )
+
+    return CombatResult(action, hit = true, damageResult = damageResult, state = state)
+  }
 }
