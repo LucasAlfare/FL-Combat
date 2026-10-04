@@ -20,22 +20,17 @@ data class Item(
   val modifiers: Map<String, List<Modifier>> = emptyMap()
 )
 
-class Effect(
+data class Effect(
   val id: String,
   val modifiers: Map<String, List<Modifier>> = emptyMap(),
   val durationTicks: Int? = null,
   val onApply: (Agent, CombatState) -> Unit = { _, _ -> },
   val onRemove: (Agent, CombatState) -> Unit = { _, _ -> }
 ) {
-  var remainingTicks: Int? = durationTicks
-    private set
-
-  val isPermanent: Boolean get() = durationTicks == null
-  val isExpired: Boolean get() = remainingTicks == 0
-
-  fun tick() {
-    val remaining = remainingTicks ?: return
-    if (remaining > 0) remainingTicks = remaining - 1
+  init {
+    require(durationTicks == null || durationTicks >= 0) {
+      "durationTicks ($durationTicks) must be null or non-negative"
+    }
   }
 }
 
@@ -59,11 +54,13 @@ class CombatState(
   private val modifierComposer: ModifierComposer = AdditiveThenPercentageComposer
 ) {
 
+  private class AppliedEffect(val effect: Effect, var remainingTicks: Int?)
+
   private val agents: MutableSet<Agent> = mutableSetOf()
   private val baseValues: MutableMap<Agent, MutableMap<String, Int>> = mutableMapOf()
   private val modifiers: MutableMap<Agent, MutableMap<String, MutableList<Modifier>>> = mutableMapOf()
   private val items: MutableMap<Agent, MutableMap<String, Item>> = mutableMapOf()
-  private val effects: MutableMap<Agent, MutableMap<String, Effect>> = mutableMapOf()
+  private val effects: MutableMap<Agent, MutableMap<String, AppliedEffect>> = mutableMapOf()
   private val defeated: MutableSet<Agent> = mutableSetOf()
   private val pendingEvents: MutableList<CombatEvent> = mutableListOf()
 
@@ -95,7 +92,7 @@ class CombatState(
     baseValues.getOrPut(agent) { mutableMapOf() }[id] = baseValue
   }
 
-  fun baseValue(agent: Agent, id: String): Int? =
+  private fun baseValue(agent: Agent, id: String): Int? =
     baseValues[agent]?.get(id)
 
   fun addModifier(agent: Agent, attributeId: String, modifier: Modifier) {
@@ -125,38 +122,42 @@ class CombatState(
     require(agent in agents) { "Agent '${agent.id}' is not registered" }
     val agentEffects = effects.getOrPut(agent) { mutableMapOf() }
     agentEffects[effect.id]?.let { previous ->
-      previous.onRemove(agent, this)
-      pendingEvents.add(CombatEvent.EffectRemoved(agent, previous))
+      previous.effect.onRemove(agent, this)
+      pendingEvents.add(CombatEvent.EffectRemoved(agent, previous.effect))
     }
-    agentEffects[effect.id] = effect
+    agentEffects[effect.id] = AppliedEffect(effect, effect.durationTicks)
     effect.onApply(agent, this)
     pendingEvents.add(CombatEvent.EffectApplied(agent, effect))
   }
 
   fun removeEffect(agent: Agent, effectId: String): Effect? {
     val removed = effects[agent]?.remove(effectId) ?: return null
-    removed.onRemove(agent, this)
-    pendingEvents.add(CombatEvent.EffectRemoved(agent, removed))
-    return removed
+    removed.effect.onRemove(agent, this)
+    pendingEvents.add(CombatEvent.EffectRemoved(agent, removed.effect))
+    return removed.effect
   }
 
   fun effects(agent: Agent): Set<Effect> =
-    effects[agent]?.values?.toSet() ?: emptySet()
+    effects[agent]?.values?.map { it.effect }?.toSet() ?: emptySet()
 
   fun effect(agent: Agent, effectId: String): Effect? =
-    effects[agent]?.get(effectId)
+    effects[agent]?.get(effectId)?.effect
+
+  fun remainingTicks(agent: Agent, effectId: String): Int? =
+    effects[agent]?.get(effectId)?.remainingTicks
 
   fun tick(agent: Agent) {
     val agentEffects = effects[agent] ?: return
-    val expired = mutableListOf<Effect>()
-    for (effect in agentEffects.values) {
-      effect.tick()
-      if (effect.isExpired) expired.add(effect)
+    val expired = mutableListOf<AppliedEffect>()
+    for (applied in agentEffects.values) {
+      val remaining = applied.remainingTicks ?: continue
+      if (remaining > 0) applied.remainingTicks = remaining - 1
+      if (applied.remainingTicks == 0) expired.add(applied)
     }
-    for (effect in expired) {
-      agentEffects.remove(effect.id)
-      effect.onRemove(agent, this)
-      pendingEvents.add(CombatEvent.EffectRemoved(agent, effect))
+    for (applied in expired) {
+      agentEffects.remove(applied.effect.id)
+      applied.effect.onRemove(agent, this)
+      pendingEvents.add(CombatEvent.EffectRemoved(agent, applied.effect))
     }
   }
 
@@ -166,7 +167,7 @@ class CombatState(
       ?.flatMap { it.modifiers[attributeId].orEmpty() }
       ?: emptyList()
     val fromEffects = effects[agent]?.values
-      ?.flatMap { it.modifiers[attributeId].orEmpty() }
+      ?.flatMap { it.effect.modifiers[attributeId].orEmpty() }
       ?: emptyList()
     return direct + fromItems + fromEffects
   }
@@ -320,17 +321,8 @@ data class DamageApplicationContext(
   val state: CombatState
 )
 
-data class DamageApplicationResult(
-  val appliedDamage: Int,
-  val targetDefeated: Boolean
-) {
-  init {
-    require(appliedDamage >= 0) { "appliedDamage ($appliedDamage) must not be negative" }
-  }
-}
-
 fun interface DamageApplication {
-  fun apply(mitigatedDamage: Int, context: DamageApplicationContext): DamageApplicationResult
+  fun apply(mitigatedDamage: Int, context: DamageApplicationContext): Int
 }
 
 data class DamageResult(
@@ -388,10 +380,6 @@ class CombatResolver(
   fun resolve(action: CombatAction, state: CombatState): CombatResult {
     state.drainEvents()
 
-    val attacker = action.attacker
-    val target = action.target
-    val damageType = action.damageType
-
     if (!hitResolution.resolve(action, state)) {
       val events = state.drainEvents() + CombatEvent.AttackMissed(action)
       return CombatResult(action, hit = false, damageResult = null, state = state, events = events)
@@ -400,30 +388,28 @@ class CombatResolver(
     val events = mutableListOf<CombatEvent>()
     events.add(CombatEvent.AttackPerformed(action))
 
-    val range = damageFormula.calculate(DamageContext(attacker, target, state))
+    val range = damageFormula.calculate(DamageContext(action.attacker, action.target, state))
     val rolledDamage = damageRoll.roll(range)
     val mitigatedDamage = mitigation.mitigate(
       rolledDamage,
-      MitigationContext(attacker, target, damageType, state)
+      MitigationContext(action.attacker, action.target, action.damageType, state)
     )
-    val applicationResult = damageApplication.apply(
+    val appliedDamage = damageApplication.apply(
       mitigatedDamage,
-      DamageApplicationContext(attacker, target, damageType, state)
+      DamageApplicationContext(action.attacker, action.target, action.damageType, state)
     )
 
     val damageResult = DamageResult(
-      origin = attacker,
-      target = target,
-      damageType = damageType,
+      origin = action.attacker,
+      target = action.target,
+      damageType = action.damageType,
       rolledDamage = rolledDamage,
       mitigatedDamage = mitigatedDamage,
-      appliedDamage = applicationResult.appliedDamage
+      appliedDamage = appliedDamage
     )
 
-    val stateEvents = state.drainEvents()
-
     events.add(CombatEvent.DamageProduced(damageResult))
-    events.addAll(stateEvents)
+    events.addAll(state.drainEvents())
     events.add(CombatEvent.DamageApplied(damageResult))
 
     return CombatResult(action, hit = true, damageResult = damageResult, state = state, events = events)
