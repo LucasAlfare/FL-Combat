@@ -222,3 +222,19 @@ class FixedDamageFormula(private val damage: Int) : DamageFormula {
   override fun calculate(context: DamageContext): DamageRange =
     DamageRange(damage, damage)
 }
+
+fun interface DamageRoll {
+  fun roll(range: DamageRange): Int
+}
+
+object DeterministicDamageRoll : DamageRoll {
+  override fun roll(range: DamageRange): Int = range.min
+}
+
+class UniformDamageRoll(
+  private val randomSource: RandomSource
+) : DamageRoll {
+
+  override fun roll(range: DamageRange): Int =
+    randomSource.nextInt(range.min, range.max)
+}
