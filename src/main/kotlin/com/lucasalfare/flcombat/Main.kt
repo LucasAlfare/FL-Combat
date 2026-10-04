@@ -1,5 +1,3 @@
 package com.lucasalfare.flcombat
 
-fun main() {
-  println("")
-}
+data class Agent(val id: String)
