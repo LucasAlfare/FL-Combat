@@ -238,3 +238,14 @@ class UniformDamageRoll(
   override fun roll(range: DamageRange): Int =
     randomSource.nextInt(range.min, range.max)
 }
+
+data class DamageResult(
+  val origin: Agent,
+  val target: Agent,
+  val damageType: String,
+  val rolledDamage: Int
+) {
+  init {
+    require(rolledDamage >= 0) { "rolledDamage ($rolledDamage) must not be negative" }
+  }
+}
