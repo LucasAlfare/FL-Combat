@@ -1,416 +1,383 @@
-# FL-Combat — Referência Rápida da API
+# Sumário da API Pública
 
-**Package:** `com.lucasalfare.flcombat`
+## Visão Geral
 
-## 1. Identidade
+Biblioteca Kotlin para modelagem de combate (`flcombat`). Fornece um estado autoritativo e imutável em relação aos
+participantes (`CombatState`), sistema de atributos com modificadores, itens e efeitos, pipeline completo de resolução
+de dano (hit → fórmula → roll → mitigação → aplicação) e eventos observáveis. Toda a lógica de jogo é injetável via
+estratégias (`fun interface`), mantendo o core agnóstico a regras específicas.
 
-### `Agent`
+## Métodos e Tipos Públicos
 
-* `id: String`
+### `Agent(id: String)`
 
-Identidade estável de um participante. Não possui estado de combate.
+**Propósito:**  
+Identidade estável e imutável de um participante do combate. Serve apenas como chave estrutural; todo estado mutável
+fica no `CombatState`.
 
-### `Attribute`
+**Parâmetros:**
 
-* `id`
-* `baseValue`
-* `effectiveValue`
+- `id` (`String`): Identificador estável definido pelo consumidor.
 
-Snapshot imutável de um atributo.
-
-### `Modifier`
-
-* `id`
-* `value`
-
-Alteração opaca de um atributo. O significado do `id` pertence ao `ModifierComposer`.
-
----
-
-# 2. Itens e efeitos
-
-### `Item`
-
-* `id`
-* `modifiers: Map<String, List<Modifier>>`
-
-Fonte de modificadores associada a um agente.
-
-Adicionar outro item com o mesmo `id` substitui o anterior.
-
-### `Effect`
-
-* `id`
-* `modifiers`
-* `durationTicks: Int?`
-* `onApply`
-* `onRemove`
-
-Efeito temporário ou permanente.
-
-* `null` → permanente;
-* `0` → expira no primeiro `tick`;
-* positivo → duração inicial.
-
-Mesmo `id` → efeito anterior é removido e substituído.
-
----
-
-# 3. Composição de atributos
-
-### `ModifierComposer`
-
-`compose(baseValue, modifiers): Int`
-
-Define como modificadores produzem o valor efetivo.
-
-### `AdditiveThenPercentageComposer`
-
-Implementação padrão.
-
-IDs reconhecidos:
-
-* `ADDITIVE = "additive"`
-* `PERCENTAGE = "percentage"`
-
-Fórmula:
-
-`floor((base + additive) × (100 + percentage) / 100)`
-
-Outros modificadores são ignorados.
-
----
-
-# 4. Estado
-
-### `CombatState`
-
-Estado mutável de um combate.
-
-Principais APIs:
-
-* `register(agent)`
-* `contains(agent)`
-* `agents()`
-* `setAttribute(...)`
-* `attribute(...)`
-* `attributes(...)`
-* `removeAttribute(...)`
-* `addModifier(...)`
-* `removeModifier(...)`
-* `modifiers(...)`
-* `addItem(...)`
-* `removeItem(...)`
-* `items(...)`
-* `applyEffect(...)`
-* `removeEffect(...)`
-* `effects(...)`
-* `effect(...)`
-* `remainingTicks(...)`
-* `tick(...)`
-* `markDefeated(...)`
-* `isDefeated(...)`
-* `drainEvents()`
-
-Entidades precisam ser registradas para as principais operações de mutação.
-
-O estado é síncrono e **não thread-safe**.
-
----
-
-# 5. Aleatoriedade
-
-### `RandomSource`
-
-`nextInt(fromInclusive, toInclusive): Int`
-
-Fornece um inteiro dentro de intervalo inclusivo.
-
-### `DefaultRandomSource`
-
-Implementação usando `Random.Default`.
-
-### `DeterministicRandomSource`
-
-Fornece uma sequência pré-configurada.
-
-Útil para testes reproduzíveis.
-
----
-
-# 6. Dano
-
-### `DamageRange`
-
-* `min`
-* `max`
-
-Faixa inclusiva de dano possível.
-
-`min >= 0` e `min <= max`.
-
-### `DamageContext`
-
-* `attacker`
-* `target`
-* `state`
-
-Contexto para cálculo do dano.
-
-### `DamageFormula`
-
-`calculate(context): DamageRange`
-
-Define **qual dano é possível**, sem realizar a rolagem.
-
-### `FixedDamageFormula`
-
-Sempre produz uma faixa fixa:
-
-`damage..damage`
-
----
-
-# 7. Rolagem
-
-### `DamageRoll`
-
-`roll(range): Int`
-
-Escolhe o dano concreto dentro de uma `DamageRange`.
-
-### `DeterministicDamageRoll`
-
-Sempre retorna `range.min`.
-
-### `UniformDamageRoll`
-
-Usa `RandomSource` para escolher uniformemente dentro da faixa.
-
----
-
-# 8. Mitigação
-
-### `MitigationContext`
-
-* `origin`
-* `target`
-* `damageType`
-* `state`
-
-### `Mitigation`
-
-`mitigate(rolledDamage, context): Int`
-
-Transforma o dano rolado antes da aplicação.
-
-### `NoMitigation`
-
-Não reduz o dano.
-
-### `FixedReductionMitigation`
-
-Subtrai quantidade fixa, nunca abaixo de zero.
-
-### `PercentageReductionMitigation`
-
-Aplica redução percentual, com resultado nunca negativo.
-
-### `MitigationChain`
-
-Executa várias mitigações sequencialmente na ordem fornecida.
-
-Cadeia vazia equivale a nenhuma mitigação.
-
----
-
-# 9. Aplicação
-
-### `DamageApplicationContext`
-
-* `origin`
-* `target`
-* `damageType`
-* `state`
-
-### `DamageApplication`
-
-`apply(mitigatedDamage, context): Int`
-
-É o ponto onde o dano pode alterar efetivamente o `CombatState`.
-
-O retorno é o dano realmente aplicado e pode ser menor que o dano mitigado.
-
----
-
-# 10. Resultado do dano
-
-### `DamageResult`
-
-* `origin`
-* `target`
-* `damageType`
-* `rolledDamage`
-* `mitigatedDamage`
-* `appliedDamage`
-
-Distingue claramente:
-
-`rolado → mitigado → aplicado`
-
-Todos os valores são não negativos.
-
----
-
-# 11. Ações
-
-### `CombatAction`
-
-Interface com:
-
-* `attacker`
-* `target`
-* `damageType`
-
-Permite que a aplicação defina seus próprios tipos de ação.
-
-### `Attack`
-
-Implementação padrão simples de `CombatAction`.
-
----
-
-# 12. Acerto
-
-### `HitResolution`
-
-`resolve(action, state): Boolean`
-
-Decide se a ação acertou.
-
-Não deve modificar o estado.
-
-### `AlwaysHit`
-
-Sempre retorna `true`.
-
----
-
-# 13. Resolução
-
-### `CombatResolver`
-
-Recebe:
-
-* `HitResolution`
-* `DamageFormula`
-* `DamageRoll`
-* `Mitigation`
-* `DamageApplication`
-
-### `resolve(action, state): CombatResult`
-
-Pipeline:
-
-`Action → Hit → Formula → Roll → Mitigation → Application`
-
-Miss:
-
-* `hit = false`;
-* `damageResult = null`;
-* gera `AttackMissed`.
-
-Hit:
-
-* gera `AttackPerformed`;
-* calcula e aplica dano;
-* produz `DamageResult`;
-* coleta eventos gerados durante a aplicação.
-
----
-
-# 14. Resultado do combate
-
-### `CombatResult`
-
-* `action`
-* `hit`
-* `damageResult`
-* `state`
-* `events`
-
-Em caso de miss, `damageResult == null`.
-
-`state` é a mesma instância fornecida ao resolver.
-
----
-
-# 15. Eventos
-
-### `CombatEvent`
-
-`sealed interface`
-
-Eventos disponíveis:
-
-* `AttackPerformed`
-* `AttackMissed`
-* `DamageProduced`
-* `DamageApplied`
-* `EffectApplied`
-* `EffectRemoved`
-* `Defeat`
-
-Eventos carregam os dados necessários para o consumidor reagir sem o core conhecer UI ou regras específicas do jogo.
-
----
-
-# 16. Modelo mental rápido
-
-### Participante
-
+**Retorno:**  
 `Agent`
 
-### Estado
+---
 
-`CombatState`
+### `Attribute(id: String, baseValue: Int, effectiveValue: Int)`
 
-### Atributos
+**Propósito:**  
+Snapshot imutável de um atributo de um agente (valor base + valor efetivo após modificadores).
 
-`Attribute + Modifier + ModifierComposer`
+**Parâmetros:**
 
-### Ação
+- `id` (`String`): Identificador do atributo.
+- `baseValue` (`Int`): Valor antes dos modificadores.
+- `effectiveValue` (`Int`): Valor após composição dos modificadores.
 
-`CombatAction`
+**Retorno:**  
+`Attribute`
 
-### Acerto
+---
 
-`HitResolution`
+### `Modifier(id: String, value: Int)`
 
-### Dano possível
+**Propósito:**  
+Alteração opaca aplicável a um atributo. A semântica do `id` é definida exclusivamente pelo `ModifierComposer` em uso.
 
-`DamageFormula → DamageRange`
+**Parâmetros:**
 
-### Dano concreto
+- `id` (`String`): Tag semântica consumida pelo composer.
+- `value` (`Int`): Magnitude do modificador.
 
-`DamageRoll`
+**Retorno:**  
+`Modifier`
 
-### Dano após defesa
+---
 
-`Mitigation`
+### `Item(id: String, modifiers: Map<String, List<Modifier>> = emptyMap())`
 
-### Dano efetivamente aplicado
+**Propósito:**  
+Objeto possuído por um agente que contribui com modificadores para um ou mais atributos.
 
-`DamageApplication`
+**Parâmetros:**
 
-### Resultado
+- `id` (`String`): Identificador estável do item.
+- `modifiers` (`Map<String, List<Modifier>>`): Mapa de atributo → lista de modificadores.
 
-`DamageResult → CombatResult`
+**Retorno:**  
+`Item`
 
-### Observação
+---
 
-`CombatEvent`
+###
+`Effect(id: String, modifiers: Map<String, List<Modifier>> = emptyMap(), durationTicks: Int? = null, onApply: (Agent, CombatState) → Unit = { _, _ → }, onRemove: (Agent, CombatState) → Unit = { _, _ → })`
 
-### Regra central
+**Propósito:**  
+Status (buff/debuff) aplicado a um agente, com duração opcional e callbacks de ciclo de vida.
 
-**O jogo fornece o significado. O core fornece a estrutura do combate.**
+**Parâmetros:**
+
+- `id` (`String`): Identificador estável do efeito.
+- `modifiers` (`Map<String, List<Modifier>>`): Modificadores contribuídos enquanto ativo.
+- `durationTicks` (`Int?`): Duração em ticks (`null` = permanente).
+- `onApply` / `onRemove`: Callbacks executados na aplicação/remoção.
+
+**Retorno:**  
+`Effect`
+
+---
+
+### `ModifierComposer` (fun interface)
+
+**Propósito:**  
+Estratégia que transforma valor base + coleção de modificadores no valor efetivo de um atributo.
+
+Método:
+
+- `compose(baseValue: Int, modifiers: Collection<Modifier>) → Int`
+
+Implementação padrão: `AdditiveThenPercentageComposer` (soma aditivos, depois aplica porcentagem e arredonda para
+baixo).
+
+---
+
+### `CombatState(modifierComposer: ModifierComposer = AdditiveThenPercentageComposer)`
+
+**Propósito:**  
+Fonte de verdade autoritativa do estado mutável de um combate. Gerencia agentes, atributos, modificadores, itens,
+efeitos, derrota e eventos.
+
+Métodos públicos principais:
+
+| Método            | Assinatura                                                | Propósito                                                                                     |
+|-------------------|-----------------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| `drainEvents`     | `() → List<CombatEvent>`                                  | Retorna e limpa todos os eventos acumulados desde a última chamada.                           |
+| `register`        | `(agent: Agent)`                                          | Registra um participante (idempotente).                                                       |
+| `contains`        | `(agent: Agent) → Boolean`                                | Verifica se o agente está registrado.                                                         |
+| `agents`          | `() → Set<Agent>`                                         | Snapshot dos agentes registrados.                                                             |
+| `markDefeated`    | `(agent: Agent)`                                          | Marca o agente como derrotado (emite evento na primeira vez).                                 |
+| `isDefeated`      | `(agent: Agent) → Boolean`                                | Verifica se o agente está derrotado.                                                          |
+| `setAttribute`    | `(agent: Agent, id: String, baseValue: Int)`              | Define/atualiza o valor base de um atributo.                                                  |
+| `addModifier`     | `(agent: Agent, attributeId: String, modifier: Modifier)` | Adiciona um modificador direto.                                                               |
+| `removeModifier`  | `(agent: Agent, attributeId: String, modifier: Modifier)` | Remove o primeiro modificador direto igual por igualdade estrutural.                          |
+| `addItem`         | `(agent: Agent, item: Item)`                              | Anexa um item (substitui se o `id` já existir).                                               |
+| `removeItem`      | `(agent: Agent, itemId: String)`                          | Remove um item pelo id.                                                                       |
+| `items`           | `(agent: Agent) → Set<Item>`                              | Snapshot dos itens do agente.                                                                 |
+| `applyEffect`     | `(agent: Agent, effect: Effect)`                          | Aplica (ou substitui) um efeito, executando callbacks e emitindo eventos.                     |
+| `removeEffect`    | `(agent: Agent, effectId: String) → Effect?`              | Remove um efeito e retorna a instância removida (ou `null`).                                  |
+| `effects`         | `(agent: Agent) → Set<Effect>`                            | Snapshot dos efeitos ativos.                                                                  |
+| `effect`          | `(agent: Agent, effectId: String) → Effect?`              | Retorna o efeito ativo pelo id.                                                               |
+| `remainingTicks`  | `(agent: Agent, effectId: String) → Int?`                 | Retorna ticks restantes de um efeito temporário.                                              |
+| `tick`            | `(agent: Agent)`                                          | Avança em 1 tick as durações dos efeitos temporários do agente (expira os que chegam a zero). |
+| `modifiers`       | `(agent: Agent, attributeId: String) → List<Modifier>`    | Lista agregada de todos os modificadores que afetam o atributo (diretos + itens + efeitos).   |
+| `attribute`       | `(agent: Agent, id: String) → Attribute?`                 | Snapshot de um atributo (base + efetivo) ou `null`.                                           |
+| `attributes`      | `(agent: Agent) → Set<Attribute>`                         | Snapshot de todos os atributos definidos no agente.                                           |
+| `removeAttribute` | `(agent: Agent, id: String)`                              | Remove o atributo e seus modificadores diretos.                                               |
+
+---
+
+### `RandomSource` (fun interface)
+
+**Propósito:**  
+Fonte de números aleatórios limitados, usada pelo sistema de dano.
+
+Método:
+
+- `nextInt(fromInclusive: Int, toInclusive: Int) → Int`
+
+Implementações:
+
+- `DefaultRandomSource` — usa `Random.Default`.
+- `DeterministicRandomSource(values: Iterator<Int>)` — sequência fixa para testes.
+
+---
+
+### `DamageRange(min: Int, max: Int)`
+
+**Propósito:**  
+Intervalo inclusivo de possíveis valores de dano (min e max não-negativos, min ≤ max).
+
+---
+
+### `DamageContext(attacker: Agent, target: Agent, state: CombatState)`
+
+**Propósito:**  
+Contexto passado a uma `DamageFormula`.
+
+---
+
+### `DamageFormula` (fun interface)
+
+**Propósito:**  
+Calcula o intervalo de dano possível para um contexto (puro, sem aleatoriedade).
+
+Método:
+
+- `calculate(context: DamageContext) → DamageRange`
+
+Implementação de conveniência: `FixedDamageFormula(damage: Int)`.
+
+---
+
+### `DamageRoll` (fun interface)
+
+**Propósito:**  
+Seleciona um valor concreto dentro de um `DamageRange`.
+
+Método:
+
+- `roll(range: DamageRange) → Int`
+
+Implementações:
+
+- `DeterministicDamageRoll` — sempre retorna o mínimo.
+- `UniformDamageRoll(randomSource: RandomSource)` — sorteio uniforme.
+
+---
+
+### `MitigationContext(origin: Agent, target: Agent, damageType: String, state: CombatState)`
+
+**Propósito:**  
+Contexto passado a uma `Mitigation`.
+
+---
+
+### `Mitigation` (fun interface)
+
+**Propósito:**  
+Transforma o dano rolado em dano mitigado (sempre não-negativo).
+
+Método:
+
+- `mitigate(rolledDamage: Int, context: MitigationContext) → Int`
+
+Implementações:
+
+- `NoMitigation`
+- `FixedReductionMitigation(reduction: Int)`
+- `PercentageReductionMitigation(percentage: Int)`
+- `MitigationChain(mitigations: List<Mitigation>)`
+
+---
+
+### `DamageApplicationContext(origin: Agent, target: Agent, damageType: String, state: CombatState)`
+
+**Propósito:**  
+Contexto passado a uma `DamageApplication` (permite mutação do estado).
+
+---
+
+### `DamageApplication` (fun interface)
+
+**Propósito:**  
+Escreve o dano mitigado no estado e retorna quanto foi efetivamente aplicado.
+
+Método:
+
+- `apply(mitigatedDamage: Int, context: DamageApplicationContext) → Int`
+
+---
+
+### `DamageResult(...)`
+
+**Propósito:**  
+Resultado imutável da resolução de dano, preservando as três etapas: rolled → mitigated → applied.
+
+Propriedades: `origin`, `target`, `damageType`, `rolledDamage`, `mitigatedDamage`, `appliedDamage`.
+
+---
+
+### `CombatAction` (interface)
+
+**Propósito:**  
+Intenção de interação de combate (atacante, alvo e tipo de dano).
+
+Propriedades: `attacker: Agent`, `target: Agent`, `damageType: String`.
+
+Implementação canônica: `Attack(attacker, target, damageType)`.
+
+---
+
+### `HitResolution` (fun interface)
+
+**Propósito:**  
+Decide se uma ação acerta o alvo.
+
+Método:
+
+- `resolve(action: CombatAction, state: CombatState) → Boolean`
+
+Implementação: `AlwaysHit`.
+
+---
+
+### `CombatResult(...)`
+
+**Propósito:**  
+Resultado completo da resolução de uma ação.
+
+Propriedades: `action`, `hit`, `damageResult: DamageResult?`, `state`, `events: List<CombatEvent>`.
+
+---
+
+### `CombatResolver(...)`
+
+**Propósito:**  
+Orquestrador do pipeline completo de resolução de ação:
+
+`Ação → Hit → Fórmula → Roll → Mitigação → Aplicação`
+
+Construtor:
+
+```kotlin
+CombatResolver(
+  hitResolution: HitResolution,
+  damageFormula: DamageFormula,
+  damageRoll: DamageRoll,
+  mitigation: Mitigation,
+  damageApplication: DamageApplication
+)
+```
+
+Método público:
+
+- `resolve(action: CombatAction, state: CombatState) → CombatResult`
+
+---
+
+### `CombatEvent` (sealed interface)
+
+**Propósito:**  
+Eventos estruturados e sem efeitos colaterais emitidos durante o combate.
+
+Subtipos:
+
+- `AttackPerformed(action)`
+- `AttackMissed(action)`
+- `DamageProduced(result)`
+- `DamageApplied(result)`
+- `EffectApplied(agent, effect)`
+- `EffectRemoved(agent, effect)`
+- `Defeat(agent)`
+
+---
+
+## Como Usar
+
+1. **Crie o estado e registre os participantes:**
+   ```kotlin
+   val state = CombatState()
+   val hero = Agent("hero")
+   val enemy = Agent("enemy")
+   state.register(hero)
+   state.register(enemy)
+   ```
+
+2. **Defina atributos, itens e efeitos:**
+   ```kotlin
+   state.setAttribute(hero, "hp", 100)
+   state.setAttribute(hero, "strength", 15)
+   state.addItem(hero, Item("sword", mapOf("strength" to listOf(Modifier("additive", 5)))))
+   state.applyEffect(enemy, Effect("poison", durationTicks = 3, onApply = { a, s -> /* ... */ }))
+   ```
+
+3. **Monte o resolver com as estratégias desejadas:**
+   ```kotlin
+   val resolver = CombatResolver(
+     hitResolution = AlwaysHit,
+     damageFormula = FixedDamageFormula(20), // ou uma fórmula customizada
+     damageRoll = UniformDamageRoll(DefaultRandomSource),
+     mitigation = MitigationChain(
+       FixedReductionMitigation(2),
+       PercentageReductionMitigation(10)
+     ),
+     damageApplication = { mitigated, ctx ->
+       // exemplo: subtrair de "hp" e marcar derrota se <= 0
+       val hp = ctx.state.attribute(ctx.target, "hp") ?: return@DamageApplication 0
+       val newHp = (hp.effectiveValue - mitigated).coerceAtLeast(0)
+       ctx.state.setAttribute(ctx.target, "hp", newHp)
+       if (newHp == 0) ctx.state.markDefeated(ctx.target)
+       mitigated
+     }
+   )
+   ```
+
+4. **Resolva ações:**
+   ```kotlin
+   val action = Attack(hero, enemy, damageType = "physical")
+   val result = resolver.resolve(action, state)
+
+   // result.hit, result.damageResult, result.events
+   result.events.forEach { /* processar eventos */ }
+   ```
+
+5. **Avance efeitos no tempo (quando seu modelo de turno exigir):**
+   ```kotlin
+   state.tick(enemy)
+   val events = state.drainEvents() // pega EffectRemoved se algum expirou
+   ```
+
+O core é completamente agnóstico a regras de jogo: fórmulas de dano, chance de acerto, mitigação e aplicação de dano são
+todas estratégias injetáveis. O `CombatState` centraliza o estado mutável e os eventos, permitindo integração fácil com
+sistemas de turno (como o `flturns` anterior).
